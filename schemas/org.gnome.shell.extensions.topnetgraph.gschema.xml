@@ -11,9 +11,9 @@
       <description>Whether to show line graph or filled areas</description>
     </key>
     <key name="network-interface" type="s">
-      <default>'auto'</default>
+      <default>'any'</default>
       <summary>Network interface to monitor</summary>
-      <description>Specific interface name or 'auto' for all active interfaces</description>
+      <description>Specific interface name or 'any' for all interfaces</description>
     </key>
     <key name="update-interval" type="i">
       <range min="100" max="2000"/>
@@ -30,6 +30,16 @@
       <default>true</default>
       <summary>Show download traffic</summary>
       <description>Whether to display download speed in graph</description>
+    </key>
+    <key name="download-color" type="s">
+      <default>'#4d9cff'</default>
+      <summary>Download traffic color</summary>
+      <description>Hex color used for download traffic in the graph</description>
+    </key>
+    <key name="upload-color" type="s">
+      <default>'#ffa033'</default>
+      <summary>Upload traffic color</summary>
+      <description>Hex color used for upload traffic in the graph</description>
     </key>
   </schema>
 </schemalist>

@@ -1,5 +1,6 @@
 {
   "uuid": "topnetgraph@rohitkr150015.github.io",
+  "schema": "org.gnome.shell.extensions.topnetgraph",
   "name": "TopNetGraph",
   "description": "Displays a real-time network traffic graph in the top panel.\n\nUseful for monitoring upload and download speeds visually.",
   "shell-version": ["45" , "46"],

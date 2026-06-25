@@ -18,7 +18,7 @@ class NetworkData {
         this.maxHistory = 60; // Keep 60 data points (30 seconds at 500ms intervals)
         this.maxBandwidth = 1024 * 1024; // 1MB/s initial scale
         this.lastStats = new Map(); // Interface -> {rx_bytes, tx_bytes, timestamp}
-        this.currentInterface = 'auto';
+        this.currentInterface = 'any';
     }
 
     addDataPoint(upload, download) {
@@ -114,17 +114,36 @@ class NetworkGraph extends St.DrawingArea {
         this._drawCurrentIndicator(cr, width, height);
     }
 
+    _parseColor(colorString, alpha = 1.0) {
+        const hex = (colorString || '#4d9cff').trim();
+        const normalized = hex.startsWith('#') ? hex.slice(1) : hex;
+        const fullHex = normalized.length === 3
+            ? normalized.split('').map((char) => char + char).join('')
+            : normalized;
+        const safeHex = fullHex.length >= 6 ? fullHex.slice(0, 6) : '4d9cff';
+        const colorValue = parseInt(safeHex, 16) || 0x4d9cff;
+
+        return [
+            ((colorValue >> 16) & 0xff) / 255,
+            ((colorValue >> 8) & 0xff) / 255,
+            (colorValue & 0xff) / 255,
+            alpha,
+        ];
+    }
+
     _drawGraph(cr, width, height, history) {
         const maxBandwidth = this._networkData.maxBandwidth;
         const stepX = width / Math.max(1, history.length - 1);
         const showUpload = this._getSetting('show-upload', true);
         const showDownload = this._getSetting('show-download', true);
         const graphType = this._getSetting('graph-type', 'filled');
+        const downloadColor = this._parseColor(this._getSetting('download-color', '#4d9cff'), graphType === 'line' ? 0.9 : 0.6);
+        const uploadColor = this._parseColor(this._getSetting('upload-color', '#ffa033'), graphType === 'line' ? 0.9 : 0.6);
         
-        // Draw download area/line (blue)
+        // Draw download area/line
         if (showDownload) {
             if (graphType === 'line') {
-                cr.setSourceRGBA(0.2, 0.6, 1.0, 0.9);
+                cr.setSourceRGBA(...downloadColor);
                 cr.setLineWidth(1.5);
                 cr.moveTo(0, height - (Math.min(history[0].download / maxBandwidth, 1.0) * height * 0.85));
                 
@@ -136,7 +155,7 @@ class NetworkGraph extends St.DrawingArea {
                 }
                 cr.stroke();
             } else {
-                cr.setSourceRGBA(0.2, 0.6, 1.0, 0.6);
+                cr.setSourceRGBA(...downloadColor);
                 cr.moveTo(0, height);
                 
                 for (let i = 0; i < history.length; i++) {
@@ -151,10 +170,10 @@ class NetworkGraph extends St.DrawingArea {
             }
         }
 
-        // Draw upload area/line (orange, stacked on top for filled, separate for line)
+        // Draw upload area/line
         if (showUpload) {
             if (graphType === 'line') {
-                cr.setSourceRGBA(1.0, 0.6, 0.2, 0.9);
+                cr.setSourceRGBA(...uploadColor);
                 cr.setLineWidth(1.5);
                 cr.moveTo(0, height - (Math.min(history[0].upload / maxBandwidth, 1.0) * height * 0.85));
                 
@@ -166,7 +185,7 @@ class NetworkGraph extends St.DrawingArea {
                 }
                 cr.stroke();
             } else {
-                cr.setSourceRGBA(1.0, 0.6, 0.2, 0.6);
+                cr.setSourceRGBA(...uploadColor);
                 cr.moveTo(0, height);
                 
                 for (let i = 0; i < history.length; i++) {
@@ -183,7 +202,7 @@ class NetworkGraph extends St.DrawingArea {
 
         // Draw outline for better visibility (filled areas only)
         if (graphType === 'filled' && showDownload) {
-            cr.setSourceRGBA(1, 1, 1, 0.3);
+            cr.setSourceRGBA(...this._parseColor(this._getSetting('download-color', '#4d9cff'), 0.3));
             cr.setLineWidth(0.5);
             cr.moveTo(0, height - (Math.min(history[0].download / maxBandwidth, 1.0) * height * 0.85));
             
@@ -224,6 +243,8 @@ class NetworkGraph extends St.DrawingArea {
             case 'show-download':
                 return this._settings.get_boolean(key);
             case 'graph-type':
+            case 'download-color':
+            case 'upload-color':
                 return this._settings.get_string(key);
             default:
                 return defaultValue;
@@ -272,7 +293,7 @@ class NetworkGraphButton extends PanelMenu.Button {
 
     _initializeSettings() {
         if (this._settings) {
-            this._networkData.currentInterface = this._settings.get_string('network-interface');
+            this._networkData.currentInterface = this._normalizeInterfaceSetting(this._settings.get_string('network-interface'));
         }
     }
 
@@ -288,8 +309,13 @@ class NetworkGraphButton extends PanelMenu.Button {
         });
 
         this._interfaceChangedId = this._settings.connect('changed::network-interface', () => {
-            this._networkData.currentInterface = this._settings.get_string('network-interface');
+            this._networkData.currentInterface = this._normalizeInterfaceSetting(this._settings.get_string('network-interface'));
         });
+    }
+
+    _normalizeInterfaceSetting(value) {
+        const normalized = (value || '').trim().toLowerCase();
+        return normalized === 'auto' || normalized === '' ? 'any' : normalized;
     }
 
     _createMenu() {
@@ -359,7 +385,7 @@ class NetworkGraphButton extends PanelMenu.Button {
         let totalUpload = 0, totalDownload = 0;
         let activeInterfaces = [];
         const now = GLib.get_monotonic_time() / 1000; // Convert to milliseconds
-        const targetInterface = this._networkData.currentInterface;
+        const targetInterface = this._normalizeInterfaceSetting(this._networkData.currentInterface);
         
         for (const line of lines) {
             const trimmed = line.trim();
@@ -373,14 +399,14 @@ class NetworkGraphButton extends PanelMenu.Button {
             // Skip loopback
             if (interfaceName === 'lo') continue;
             
-            // Filter by specific interface if not 'auto'
-            if (targetInterface !== 'auto' && interfaceName !== targetInterface) continue;
+            // Filter by specific interface if not 'any'
+            if (targetInterface !== 'any' && interfaceName !== targetInterface) continue;
             
             const rxBytes = parseInt(parts[1]) || 0;
             const txBytes = parseInt(parts[9]) || 0;
             
             // Skip interfaces with no traffic (unless specifically selected)
-            if (targetInterface === 'auto' && rxBytes === 0 && txBytes === 0) continue;
+            if (targetInterface === 'any' && rxBytes === 0 && txBytes === 0) continue;
             
             const lastData = this._networkData.lastStats.get(interfaceName);
             
@@ -460,7 +486,7 @@ export default class TopNetGraphExtension extends Extension {
     enable() {
         console.log('TopNetGraph: Enabling extension');
         
-        this._settings = this.getSettings();
+        this._settings = this.getSettings('org.gnome.shell.extensions.topnetgraph');
         this._indicator = new NetworkGraphButton(this._settings);
         Main.panel.addToStatusArea('topnetgraph', this._indicator);
     }
