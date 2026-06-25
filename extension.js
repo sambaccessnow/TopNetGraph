@@ -327,23 +327,31 @@ class NetworkGraphButton extends PanelMenu.Button {
         this._startMonitoring();
     }
 
-    async _updateNetworkStats() {
+    _updateNetworkStats() {
         if (!this._netDevFile) return;
 
-        const [contents] = await this._netDevFile.load_contents_async(null);
-        
-        if (contents) {
-            const data = new TextDecoder().decode(contents);
-            const stats = this._parseNetworkData(data);
-            
-            if (stats) {
-                this._networkData.addDataPoint(stats.upload, stats.download);
-                this._updateMenuStats(stats);
-                if (this._graph) {
-                    this._graph.queue_repaint();
+        this._netDevFile.load_contents_async(null, (file, result) => {
+            try {
+                const [success, contents] = file.load_contents_finish(result);
+
+                if (!success || !contents) {
+                    return;
                 }
+
+                const data = new TextDecoder().decode(contents);
+                const stats = this._parseNetworkData(data);
+
+                if (stats) {
+                    this._networkData.addDataPoint(stats.upload, stats.download);
+                    this._updateMenuStats(stats);
+                    if (this._graph) {
+                        this._graph.queue_repaint();
+                    }
+                }
+            } catch (error) {
+                logError(error, 'TopNetGraph');
             }
-        }
+        });
     }
 
     _parseNetworkData(data) {
