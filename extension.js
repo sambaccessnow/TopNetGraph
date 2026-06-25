@@ -252,6 +252,13 @@ class NetworkGraph extends St.DrawingArea {
     }
 
     destroy() {
+        this._isDestroyed = true;
+        this._statsUpdatePending = false;
+        this._statsUpdateInProgress = false;
+        this._netDevFile = null;
+        this._networkData = null;
+        this._graph = null;
+
         if (this._settingsChangedId && this._settings) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
@@ -272,6 +279,9 @@ class NetworkGraphButton extends PanelMenu.Button {
         this._settingsChangedId = null;
         this._interfaceChangedId = null;
         this._netDevFile = null;
+        this._statsUpdateInProgress = false;
+        this._statsUpdatePending = false;
+        this._isDestroyed = false;
         
         // Create the graph widget
         this._graph = new NetworkGraph(this._networkData, this._settings);
@@ -353,31 +363,55 @@ class NetworkGraphButton extends PanelMenu.Button {
         this._startMonitoring();
     }
 
-    _updateNetworkStats() {
-        if (!this._netDevFile) return;
+    async _updateNetworkStats() {
+        if (!this._netDevFile || !this._networkData || this._isDestroyed) {
+            return;
+        }
 
-        this._netDevFile.load_contents_async(null, (file, result) => {
-            try {
-                const [success, contents] = file.load_contents_finish(result);
+        if (this._statsUpdateInProgress) {
+            this._statsUpdatePending = true;
+            return;
+        }
 
-                if (!success || !contents) {
-                    return;
-                }
+        this._statsUpdateInProgress = true;
 
-                const data = new TextDecoder().decode(contents);
-                const stats = this._parseNetworkData(data);
-
-                if (stats) {
-                    this._networkData.addDataPoint(stats.upload, stats.download);
-                    this._updateMenuStats(stats);
-                    if (this._graph) {
-                        this._graph.queue_repaint();
+        try {
+            const [contents] = await new Promise((resolve, reject) => {
+                this._netDevFile.load_contents_async(null, (file, result) => {
+                    try {
+                        resolve(file.load_contents_finish(result));
+                    } catch (error) {
+                        reject(error);
                     }
-                }
-            } catch (error) {
-                logError(error, 'TopNetGraph');
+                });
+            });
+
+            const data = new TextDecoder().decode(contents);
+            const stats = this._parseNetworkData(data);
+
+            if (!stats || this._isDestroyed || !this._networkData) {
+                return;
             }
-        });
+
+            this._networkData.addDataPoint(stats.upload, stats.download);
+
+            if (!this._isDestroyed && this._uploadItem && this._downloadItem && this._totalItem && this._interfaceItem) {
+                this._updateMenuStats(stats);
+            }
+
+            if (this._graph) {
+                this._graph.queue_repaint();
+            }
+        } catch (error) {
+            logError(error, 'TopNetGraph');
+        } finally {
+            this._statsUpdateInProgress = false;
+
+            if (this._statsUpdatePending && !this._isDestroyed) {
+                this._statsUpdatePending = false;
+                this._updateNetworkStats();
+            }
+        }
     }
 
     _parseNetworkData(data) {
